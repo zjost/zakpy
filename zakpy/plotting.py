@@ -2,6 +2,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import roc_auc_score, roc_curve, precision_recall_curve, recall_score
 
+"""
+E.g. 
+
+plt.rcParams['figure.figsize'] = [8, 8]
+plt.rcParams['axes.titlesize'] = 16
+plt.rcParams['axes.labelsize'] = 14
+
+"""
+
 
 def calculate_recall_at_fpr(y_true, y_hat, fpr_target=0.04):
     fpr, tpr, thresholds = roc_curve(y_true, y_hat)
@@ -12,24 +21,23 @@ def calculate_recall_at_fpr(y_true, y_hat, fpr_target=0.04):
 
 
 def plot_pr(y_trues, y_preds, labels):
-    fig, ax = plt.subplots(figsize=(6, 6))
+    fig, ax = plt.subplots()
     for i, y_pred in enumerate(y_preds):
         y_true = y_trues[i]
-        print("AUC: %f" % roc_auc_score(y_true, y_pred))
+        auc = roc_auc_score(y_true, y_pred)
         pr, re, thresholds = precision_recall_curve(y_true, y_pred)
-        ax.plot(re, pr, label=labels[i])
+        ax.plot(re, pr, label='%s; AUC=%.3f' % (labels[i], auc), marker='o', markersize=1)
     ax.legend()
     ax.grid()
-    ax.set_title('Precision-Recall curve', fontsize=16)
-    ax.set_xlabel('Recall', fontsize=14)
-    _ = ax.set_ylabel('Precision', fontsize=14)
+    ax.set_title('Precision-Recall curve')
+    ax.set_xlabel('Recall')
+    _ = ax.set_ylabel('Precision')
 
 
 def plot_roc(y_trues, y_preds, labels, x_max=1.0):
-    fig, ax = plt.subplots(figsize=(6, 6))
+    fig, ax = plt.subplots()
     for i, y_pred in enumerate(y_preds):
         y_true = y_trues[i]
-        # print("%s AUC: %f" % (labels[i], roc_auc_score(y_true, y_pred)))
         fpr, tpr, thresholds = roc_curve(y_true, y_pred)
         auc = roc_auc_score(y_true, y_pred)
         ax.plot(fpr, tpr, label='%s; AUC=%.3f' % (labels[i], auc), marker='o', markersize=1)
@@ -37,30 +45,30 @@ def plot_roc(y_trues, y_preds, labels, x_max=1.0):
     ax.legend()
     ax.grid()
     ax.plot(np.linspace(0, 1, 20), np.linspace(0, 1, 20), linestyle='--')
-    ax.set_title('ROC curve', fontsize=16)
-    ax.set_xlabel('False Positive Rate', fontsize=14)
+    ax.set_title('ROC curve')
+    ax.set_xlabel('False Positive Rate')
     ax.set_xlim([-0.01, x_max])
-    _ = ax.set_ylabel('True Positive Rate', fontsize=14)
+    _ = ax.set_ylabel('True Positive Rate')
 
 
 def plot_hist(df, column, bins=20, normed=False, title=None):
-    fig, ax = plt.subplots(figsize=(8, 8))
+    fig, ax = plt.subplots()
     _, bins_, _ = ax.hist(df[df.fraud_flag == 0][column], label='Legit', bins=bins, normed=normed, alpha=0.5)
     ax.hist(df[df.fraud_flag == 1][column], bins=bins_, label='Fraud', normed=normed, alpha=0.5)
     ax.legend()
     ax.grid()
-    ax.set_xlabel('Model Score', fontsize=14)
+    ax.set_xlabel('Model Score')
     if normed:
-        ax.set_ylabel('Density', fontsize=14)
+        ax.set_ylabel('Density')
     else:
-        ax.set_ylabel('Count', fontsize=14)
+        ax.set_ylabel('Count')
     if title is None:
         title = "Score distribution for %s" % column
-    _ = ax.set_title(title, fontsize=16)
+    _ = ax.set_title(title)
 
 
 def plot_losses(losses, labels):
-    plt.figure(figsize=(10, 10))
+    plt.figure()
     plt.xlabel('epochs')
     plt.ylabel('loss')
     plt.title('Evolution of training and testing losses')
@@ -114,7 +122,7 @@ def plot_lr_finder(df_lr_opt, lr_opt_min=None, lr_opt_max=None):
 
     cols = ['train']
 
-    fig, ax = plt.subplots(figsize=(8, 8))
+    fig, ax = plt.subplots()
 
     if 'valid' in df_lr_opt:
         cols.append('valid')

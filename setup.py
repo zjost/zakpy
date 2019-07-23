@@ -10,6 +10,7 @@ setup(
         "pandas",
         "sklearn",
         "numpy",
-        "matplotlib"
+        "matplotlib",
+        "boto3"
     ],
 )

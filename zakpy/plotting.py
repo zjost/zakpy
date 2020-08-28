@@ -20,6 +20,14 @@ def calculate_recall_at_fpr(y_true, y_hat, fpr_target=0.04):
     return recall_score(y_true, y_hat > thresh)
 
 
+def threshold_at_fpr(y_true, y_hat, fpr_target=0.04):
+    fpr, tpr, thresholds = roc_curve(y_true, y_hat)
+    fpr_idx = max(np.where(fpr <= fpr_target)[0])
+    thresh = thresholds[fpr_idx]
+    
+    return thresh
+
+
 def plot_pr(y_trues, y_preds, labels):
     fig, ax = plt.subplots()
     for i, y_pred in enumerate(y_preds):

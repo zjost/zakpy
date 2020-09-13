@@ -42,7 +42,10 @@ class CategoricalEncoder(nn.Module):
 
         self.in_features = sum([e[2] for e in embed_schema]) + sum([o[1] for o in ohe_schema])
 
-        self.embeds = nn.ModuleDict({k: nn.Embedding(e_in, e_out) for k, e_in, e_out in embed_schema})
+        self.embeds = nn.ModuleDict({
+            k: nn.Embedding(e_in, e_out)
+            for k, e_in, e_out in embed_schema
+        })
 
         self.dropout = nn.Dropout(dropout_noise)
         self.dense = nn.Linear(self.in_features, n_hidden)
@@ -54,8 +57,9 @@ class CategoricalEncoder(nn.Module):
         embeds.append(ohes.float())  # the remaining inputs
 
         h = th.cat(embeds, dim=1)
-        h = self.dropout(h)
+        #h = self.dropout(h)
         h = self.dense(h)
+        h = self.dropout(h)
         return h
 
 
@@ -67,9 +71,11 @@ class DenoisingAE(nn.Module):
     by ln(N).  Or for a single row:  F.cross_entropy(preds, y_true).item()/np.log(i)
 
     """
-    def __init__(self, embed_schema, ohe_schema, dropout_noise, n_hidden):
+    def __init__(self, embed_schema, ohe_schema, dropout_noise, n_hidden, scale_by_n=True):
 
         super(DenoisingAE, self).__init__()
+        self._writer = None
+        self.scale_by_n = scale_by_n
         self.embed_schema = embed_schema
         self.ohe_schema = ohe_schema
 
@@ -89,6 +95,14 @@ class DenoisingAE(nn.Module):
             n_hidden,
         )
 
+    @property
+    def writer(self):
+        return self._writer
+
+    @writer.setter
+    def writer(self, new_writer):
+        self._writer = new_writer
+
     def calc_loss(self, preds, ys, device):
         """
         preds is spread out over the total number of categories:  all the categoricals are concatenated.
@@ -104,11 +118,13 @@ class DenoisingAE(nn.Module):
         idx = 0
         for i, (k, n) in enumerate(self.out_map): # e.g. ("city", 1000)
             # Note:  averages the cross-entropy of column i for the whole batch
-            loss = F.cross_entropy(preds[:,idx:idx+n].to(device), ys[:,i].to(device), reduction='none') / th.log(th.FloatTensor([n]).to(device))
+            loss = F.cross_entropy(preds[:,idx:idx+n].to(device), ys[:,i].to(device), reduction='none')
+            if self.scale_by_n:
+                loss /= th.log(th.FloatTensor([n]).to(device))
             l.append(loss.reshape((-1,1)))
             idx += n
-        loss_agg = th.cat(l, dim=1).sum(dim=1).mean()
-        return loss_agg
+
+        return th.cat(l, dim=1)
 
     def forward(self, embed_idx, ohes):
         h = self.encoder(embed_idx, ohes)
@@ -116,12 +132,31 @@ class DenoisingAE(nn.Module):
         return self.decoder(h)
 
     def train_loop(self, trainLoader, testLoader, lr, wd, epochs, device):
+        n_train = len(trainLoader.dataset)
+        n_test = len(testLoader.dataset)
+
         optimizer = th.optim.Adam(self.parameters(), lr=lr, weight_decay=wd)
         self.to(device)
 
         for epoch in range(epochs):
 
-            trainingLoss = 0.0
+            testLoss = None
+            self.eval()
+            for i, (embed_idx, ohes, labels) in enumerate(testLoader):
+                outputs = self(embed_idx.to(device), ohes.to(device))
+                loss = self.calc_loss(outputs, labels, device)
+
+                # print statistics
+
+                if testLoss is not None:
+                    testLoss += loss.sum(dim=0).cpu()
+                else:
+                    testLoss = loss.sum(dim=0).cpu()
+
+                # print(testLoss.shape) # [2]
+
+
+            trainingLoss = None
             self.train()
             for i, (embed_idx, ohes, labels) in enumerate(trainLoader):
 
@@ -130,34 +165,40 @@ class DenoisingAE(nn.Module):
                 loss = self.calc_loss(outputs, labels, device)
 
                 # zero the parameter gradients
+                loss_agg = loss.sum(dim=1).mean()
                 optimizer.zero_grad()
-                loss.backward()
+                loss_agg.backward()
                 optimizer.step()
 
-                # print statistics
-                trainingLoss += loss.item()
+                if trainingLoss is not None:
+                    trainingLoss += loss.sum(dim=0).cpu()
+                else:
+                    trainingLoss = loss.sum(dim=0).cpu()
 
-            testLoss = 0.0
-            self.eval()
-            for i, (embed_idx, ohes, labels) in enumerate(testLoader):
-                outputs = self(embed_idx.to(device), ohes.to(device))
-                loss = self.calc_loss(outputs, labels, device)
-
-                # print statistics
-                testLoss += loss.item()
-
-            self.trainingLosses.append(trainingLoss / len(trainLoader))
-            self.testLosses.append(testLoss / len(testLoader))
+            self.trainingLosses.append(trainingLoss.sum().item() / n_train)
+            self.testLosses.append(testLoss.sum().item() / n_test)
 
             self._epochs += 1
+
             loss_msg = f"Epoch: {self._epochs}, Train Loss: {self.trainingLosses[-1]}, Test Loss: {self.testLosses[-1]}"
             print(loss_msg)
+
+            # Tensorboard
+            if self.writer:
+                self.writer.add_scalar('Loss/train', self.trainingLosses[-1], self._epochs)
+                self.writer.add_scalar('Loss/test', self.testLosses[-1], self._epochs)
+
+                for i, (name, _) in enumerate(self.out_map):
+                    self.writer.add_scalar(f'GroupedLoss/test/{name}', testLoss[i] / n_test, self._epochs)
+
+        if self.writer:
+            self.writer.flush()
 
     def extract_embedding(self, dataLoader, device):
         self.eval()
         self.to(device)
         embeds = list()
         for i, (embed_idx, ohes, _) in enumerate(dataLoader):
-            outputs = self(embed_idx.to(device), ohes.to(device)).detach().cpu().numpy()
+            outputs = self.encoder(embed_idx.to(device), ohes.to(device)).detach().cpu().numpy()
             embeds.append(outputs)
         return np.concatenate(embeds, axis=0)
